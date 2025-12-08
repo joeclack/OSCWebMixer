@@ -60,40 +60,42 @@ export const init = async (
   const SKIP = process.argv.indexOf("skip") !== -1;
   const DEBUG = process.argv.indexOf("debug") !== -1;
 
-  let offlineMode = false;
+  let offlineMode = true; //changed to true until fix the api issue
 
   const SessionId = createSessionId();
-  let plans = [];
-  try {
-    plans = await fetcher.getAllPlans();
-  } catch {
-    const ans = await prompts({
-      type: "confirm",
-      name: "offline",
-      message: "Planning center fetch failed. Continue in offline mode?",
-    });
 
-    offlineMode = Boolean(ans.offline);
-  }
+  // <-- Comment start to remove PC
+  // let plans = [];
+  // try {
+  //   plans = await fetcher.getAllPlans();
+  // } catch {
+  //   const ans = await prompts({
+  //     type: "confirm",
+  //     name: "offline",
+  //     message: "Planning center fetch failed. Continue in offline mode?",
+  //   });
 
-  const chosenPlan = await prompts([
-    {
-      type: "select",
-      name: "plan",
-      message: "Choose a plan",
-      choices: plans.map((x) => {
-        const date = new Date(x.sort_date);
-        return {
-          title:
-            `${x.service_type?.name.trim()} - ${date.toDateString()} ${date.toLocaleTimeString()}` ||
-            "No Name",
-          // description: JSON.stringify(new Jsona().serialize({ stuff: x }).data),
-          value: { serviceType: x.service_type.id, plan: x.id },
-        };
-      }),
-    },
-  ]);
+  //   offlineMode = Boolean(ans.offline);
+  // }
 
+  // const chosenPlan = await prompts([
+  //   {
+  //     type: "select",
+  //     name: "plan",
+  //     message: "Choose a plan",
+  //     choices: plans.map((x) => {
+  //       const date = new Date(x.sort_date);
+  //       return {
+  //         title:
+  //           `${x.service_type?.name.trim()} - ${date.toDateString()} ${date.toLocaleTimeString()}` ||
+  //           "No Name",
+  //         // description: JSON.stringify(new Jsona().serialize({ stuff: x }).data),
+  //         value: { serviceType: x.service_type.id, plan: x.id },
+  //       };
+  //     }),
+  //   },
+  // ]);
+  // --> Comment end to remove PC
   let teamMembers = [];
 
   if (!offlineMode) {
@@ -210,14 +212,14 @@ export const init = async (
   };
 
   let ipAddresses = getIPAddresses();
-  let glowAudioIp = ipAddresses.find((x) => x.startsWith("192.168"));
+  let glowAudioIp = ipAddresses.find((x) => x.startsWith("192.168.2"));
   if (SKIP) glowAudioIp = ipAddresses[0];
 
-  if (!glowAudioIp) throw new Error("NO IP FOUND FOR GLOW AUDIO");
-  if (!glowAudioIp.endsWith("7"))
-    console.info(
-      "GLOW AUDIO IP DOES NOT END WITH 7 - DOES IT MATCH THE CONSOLE"
-    );
+  //if (!glowAudioIp) throw new Error("NO IP FOUND FOR GLOW AUDIO");
+  // if (!glowAudioIp.endsWith("7"))
+  //  console.info(
+  //    "GLOW AUDIO IP DOES NOT END WITH 7 - DOES IT MATCH THE CONSOLE"
+  //  );
 
   if (!offlineMode) {
     const result = await fetcher.setPlanNote(
@@ -237,7 +239,7 @@ export const init = async (
 
   // Bind to a UDP socket to listen for incoming OSC events.
   let udpPort = new osc.UDPPort({
-    localAddress: glowAudioIp,
+    localAddress: ipAddresses[0], //glowAudioIp,
     localPort: localPort,
     remotePort: remotePort,
     remoteAddress: remoteAddress,
@@ -394,7 +396,8 @@ export const init = async (
       .createServer(app)
       .listen({ port: serverPort, host: glowAudioIp });
 
-    app.use(`/${SessionId}`, express.static(appResources));
+    //app.use(`/${SessionId}`, express.static(appResources));
+    app.use(express.static(appResources));
 
     return server;
   }
@@ -495,7 +498,7 @@ export const init = async (
   }
 
   function getWebAppUrl() {
-    return "http://" + glowAudioIp + ":" + serverPort + "/" + SessionId;
+    return "http://" + glowAudioIp + ":" + serverPort + "/"; //+ SessionId;
   }
 
   function createSessionId(): string {
