@@ -12,7 +12,8 @@
   "scripts": {
     "start": "ts-node-dev --respawn --transpile-only .",
     "dev": "ts-node-dev --respawn --transpile-only . skip",
-    "debug": "node . debug"
+    "debug": "node . debug",
+    "test": "ts-node api/churchSuite/parseRotaHtml.test.ts"
   },
   "license": "MIT",
   "keywords": [
@@ -24,11 +25,13 @@
   ],
   "dependencies": {
     "@faker-js/faker": "^8.4.1",
+    "cheerio": "^1.2.0",
     "cli-progress": "^3.11.2",
     "config": "^3.3.9",
     "express": "4.18.2",
     "jsona": "^1.12.1",
     "osc": "2.4.3",
+    "playwright": "^1.60.0",
     "prompts": "^2.4.2",
     "qrcode": "^1.5.3",
     "qrcode-terminal": "^0.12.0",

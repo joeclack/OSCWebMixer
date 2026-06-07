@@ -9,16 +9,25 @@ import express, { Application } from "express";
 import http from "http";
 import WebSocket from "ws";
 import os from "os";
-import { Fetcher } from "./planningCenter";
 import prompts from "prompts";
-import Jsona from "jsona";
 import { faker } from "@faker-js/faker";
+import {
+  UserProvider,
+  ServiceRef,
+  RotaMember,
+  buildRotaPeople,
+  findAuxChannelForRole,
+  findMemberAssignments,
+  isPlanningCenterProvider,
+  mapMembersToAuxs,
+} from "./userProvider";
 
 type AuxConfig = {
   label: string | null;
   channel: number;
   stereo: boolean;
   colour: string;
+  extraRoleNames?: string[];
   extraPlanningCenterNames?: string[];
 };
 
@@ -28,9 +37,25 @@ type GetAuthQuery = {
 type SetAuxRequest = {
   aux: number;
   channel: number;
-  level: number;
+  level?: number;
+  pan?: number;
 };
-type ClientMessage = GetAuthQuery | SetAuxRequest;
+type IdentifyRequest = {
+  identify: string;
+  role?: string;
+};
+type ClientMessage = GetAuthQuery | SetAuxRequest | IdentifyRequest;
+
+type ClientLogEntry = {
+  at: number;
+  type: "aux" | "level" | "pan";
+  aux: number;
+  auxLabel: string | null;
+  channel?: number;
+  channelLabel?: string | null;
+  value: number;
+  previousValue?: number | null;
+};
 
 // not used
 type AuthConfig = {
@@ -53,78 +78,61 @@ export const init = async (
   serverPort: number,
   mapping: Mapper,
   auth: AuthConfig,
-  fetcher: Fetcher
+  userProvider: UserProvider,
 ) => {
   let appResources = path.join(__dirname, "..", "web");
 
   const SKIP = process.argv.indexOf("skip") !== -1;
   const DEBUG = process.argv.indexOf("debug") !== -1;
 
-  let offlineMode = true; //changed to true until fix the api issue
+  let offlineMode = SKIP;
+  let rotaMembers: RotaMember[] = [];
+  let chosenService: ServiceRef | null = null;
+
+  if (!SKIP) {
+    try {
+      const services = await userProvider.listServices();
+      if (services.length === 0) {
+        const ans = await prompts({
+          type: "confirm",
+          name: "offline",
+          message: "No upcoming services found. Continue in offline mode?",
+        });
+        offlineMode = Boolean(ans.offline);
+      } else {
+        const chosen = await prompts({
+          type: "select",
+          name: "service",
+          message: "Choose a service",
+          choices: services.map((service) => ({
+            title: service.label,
+            value: service,
+          })),
+        });
+
+        if (!chosen.service) {
+          offlineMode = true;
+        } else {
+          chosenService = chosen.service;
+          rotaMembers = await userProvider.getRotaMembers(chosen.service);
+        }
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Unknown provider error";
+      const ans = await prompts({
+        type: "confirm",
+        name: "offline",
+        message: `User provider fetch failed (${message}). Continue in offline mode?`,
+      });
+      offlineMode = Boolean(ans.offline);
+    }
+  }
+
+  const rotaPeople = buildRotaPeople(rotaMembers);
+  const auxList = mapMembersToAuxs(auxs, rotaMembers);
 
   const SessionId = createSessionId();
-
-  // <-- Comment start to remove PC
-  // let plans = [];
-  // try {
-  //   plans = await fetcher.getAllPlans();
-  // } catch {
-  //   const ans = await prompts({
-  //     type: "confirm",
-  //     name: "offline",
-  //     message: "Planning center fetch failed. Continue in offline mode?",
-  //   });
-
-  //   offlineMode = Boolean(ans.offline);
-  // }
-
-  // const chosenPlan = await prompts([
-  //   {
-  //     type: "select",
-  //     name: "plan",
-  //     message: "Choose a plan",
-  //     choices: plans.map((x) => {
-  //       const date = new Date(x.sort_date);
-  //       return {
-  //         title:
-  //           `${x.service_type?.name.trim()} - ${date.toDateString()} ${date.toLocaleTimeString()}` ||
-  //           "No Name",
-  //         // description: JSON.stringify(new Jsona().serialize({ stuff: x }).data),
-  //         value: { serviceType: x.service_type.id, plan: x.id },
-  //       };
-  //     }),
-  //   },
-  // ]);
-  // --> Comment end to remove PC
-  let teamMembers = [];
-
-  if (!offlineMode) {
-    teamMembers = (await fetcher.getTeamMembers(
-      chosenPlan.plan.serviceType,
-      chosenPlan.plan.plan
-    )) as any[];
-  }
-  const teamMemberFiltered = (teamMembers as any[]).map((x: any) => ({
-    name: x.name as string,
-    id: x.id as string,
-    role: x.team_position_name as string,
-    img: x.photo_thumbnail as string,
-  }));
-
-  const found = new Set<string>();
-  const auxList = auxs.map((x) => {
-    const user = teamMemberFiltered.find((y) => {
-      return (
-        !found.has(y.id) &&
-        (y.role === x.label ||
-          x.extraPlanningCenterNames?.some((n) => n === y.role))
-      );
-    });
-
-    if (user) found.add(user.id);
-
-    return { ...x, user: user || null };
-  });
 
   /**
    * The total number of parameters that need to load.
@@ -171,7 +179,35 @@ export const init = async (
   /**
    * Socket connections that have connected
    */
-  let connections: WebSocket[] = [];
+  type ClientConnection = {
+    id: number;
+    socket: WebSocket;
+    connectedAt: number;
+    lastActivity: number;
+    aux: number | null;
+    personId: string | null;
+    personName: string | null;
+    address: string | null;
+    log: ClientLogEntry[];
+  };
+
+  type AdminClient = {
+    id: number;
+    address: string | null;
+    connectedAt: number;
+    lastActivity: number;
+    disconnectedAt: number | null;
+    aux: number | null;
+    auxLabel: string | null;
+    auxColour: string | null;
+    personName: string | null;
+    levels: ReturnType<typeof getClientLevels> | null;
+    log: ClientLogEntry[];
+  };
+
+  let connections: ClientConnection[] = [];
+  let disconnectedClients: AdminClient[] = [];
+  let nextClientId = 1;
 
   type Channel = {
     label: null | string;
@@ -212,7 +248,7 @@ export const init = async (
   };
 
   let ipAddresses = getIPAddresses();
-  let glowAudioIp = ipAddresses.find((x) => x.startsWith("192.168.2"));
+  let glowAudioIp = ipAddresses.find((x) => x.startsWith("192.168.6"));
   if (SKIP) glowAudioIp = ipAddresses[0];
 
   //if (!glowAudioIp) throw new Error("NO IP FOUND FOR GLOW AUDIO");
@@ -221,11 +257,15 @@ export const init = async (
   //    "GLOW AUDIO IP DOES NOT END WITH 7 - DOES IT MATCH THE CONSOLE"
   //  );
 
-  if (!offlineMode) {
-    const result = await fetcher.setPlanNote(
+  if (
+    !offlineMode &&
+    chosenService &&
+    isPlanningCenterProvider(userProvider)
+  ) {
+    await userProvider.getFetcher().setPlanNote(
       `EARS MIXER URL: \n\n ${getWebAppUrl()}`,
-      chosenPlan.plan.plan,
-      chosenPlan.plan.serviceType
+      String(chosenService.meta?.plan ?? chosenService.id),
+      String(chosenService.meta?.serviceType ?? ""),
     );
   }
 
@@ -234,7 +274,7 @@ export const init = async (
 	*/
   const loadingProgress = new cliProgress.SingleBar(
     {},
-    cliProgress.Presets.shades_classic
+    cliProgress.Presets.shades_classic,
   );
 
   // Bind to a UDP socket to listen for incoming OSC events.
@@ -251,7 +291,7 @@ export const init = async (
 
   let loadingAddresses = mapping.getLoadingAddresses(
     auxList,
-    supportedChannels
+    supportedChannels,
   );
 
   udpPort.on("ready", function () {
@@ -378,34 +418,182 @@ export const init = async (
     return totalLoadedParams;
   }
 
+  function getActiveConnections() {
+    return connections.filter(
+      (connection) => connection.socket.readyState <= 1,
+    );
+  }
+
+  function getAuxLabelByChannel(auxChannel: number) {
+    const aux = auxList.find((entry) => entry.channel === auxChannel);
+    return aux?.label ?? null;
+  }
+
+  function getChannelLabelByNumber(channelNumber: number) {
+    const channel = channels.find((entry) => entry.channel === channelNumber);
+    return channel?.label ?? null;
+  }
+
+  function logClientChange(
+    client: ClientConnection,
+    entry: Omit<ClientLogEntry, "at">,
+  ) {
+    client.log.push({
+      ...entry,
+      at: Date.now(),
+    });
+
+    if (client.log.length > 500) {
+      client.log.shift();
+    }
+  }
+
+  function getClientLevels(auxChannel: number) {
+    return channels.map((channel) => {
+      const value = values["a" + auxChannel + "|c" + channel.channel];
+      return {
+        channel: channel.channel,
+        label: channel.label,
+        level: value?.level ?? null,
+        pan: value?.pan ?? null,
+      };
+    });
+  }
+
+  function serializeClient(
+    connection: ClientConnection,
+    disconnectedAt: number | null = null,
+  ): AdminClient {
+    const aux = auxList.find((entry) => entry.channel === connection.aux);
+    return {
+      id: connection.id,
+      address: connection.address,
+      connectedAt: connection.connectedAt,
+      lastActivity: connection.lastActivity,
+      disconnectedAt,
+      aux: connection.aux,
+      auxLabel: aux?.label ?? null,
+      auxColour: aux?.colour ?? null,
+      personName: connection.personName,
+      levels:
+        connection.aux != null ? getClientLevels(connection.aux) : null,
+      log: connection.log,
+    };
+  }
+
+  function getChannelValuesForAux(auxChannel: number) {
+    const channelValues: Record<number, OSCValue> = {};
+    for (let value in values) {
+      for (let channel of channels) {
+        if (value == "a" + auxChannel + "|c" + channel.channel) {
+          channelValues[channel.channel] = values[value];
+        }
+      }
+    }
+    return channelValues;
+  }
+
+  function resolvePersonAssignment(
+    personId: string,
+    roleHint?: string,
+  ): { member: RotaMember; auxChannel: number | null } | null {
+    const assignments = findMemberAssignments(rotaMembers, personId);
+    if (assignments.length === 0) {
+      return null;
+    }
+
+    const member =
+      (roleHint
+        ? assignments.find((entry) => entry.role === roleHint)
+        : undefined) ?? assignments[0];
+
+    return {
+      member,
+      auxChannel: findAuxChannelForRole(auxList, member.role),
+    };
+  }
+
+  function getAdminClients() {
+    return getActiveConnections().map((connection) =>
+      serializeClient(connection),
+    );
+  }
+
+  function getAdminDisconnectedClients() {
+    return disconnectedClients;
+  }
+
   function startWebAppServer() {
     // Create an Express-based Web Socket server that clients can connect to
     let app = express();
 
-    // console.log(auth);
-    // if (auth.enabled) {
-    //   useAuthRoutes(app, auth.users);
-    // }
+    app.use(express.json());
 
-    app.get("/qr", async () => {
-      const data = await QRCode.toDataURL(getWebAppUrl());
-      return `<img src="${data}" />`;
+    app.get("/api/admin/status", async (_req, res) => {
+      res.json({
+        url: getWebAppUrl(),
+        qr: await QRCode.toDataURL(getWebAppUrl()),
+        connections: getActiveConnections().length,
+        authEnabled: auth.enabled,
+        clients: getAdminClients(),
+        disconnectedClients: getAdminDisconnectedClients(),
+        aux: auxList.map((x) => ({
+          label: x.label,
+          channel: x.channel,
+          colour: x.colour,
+          stereo: x.stereo,
+        })),
+        mixLevels: Object.fromEntries(
+          auxList.map((aux) => [aux.channel, getClientLevels(aux.channel)]),
+        ),
+        channels: channels.map((x) => ({
+          label: x.label,
+          channel: x.channel,
+        })),
+      });
     });
+
+    app.get("/qr", async (_req, res) => {
+      const data = await QRCode.toDataURL(getWebAppUrl());
+      res.send(`<img src="${data}" />`);
+    });
+
+    useAuthRoutes(app);
+
+    //app.use(`/${SessionId}`, express.static(appResources));
+    app.use(express.static(appResources));
 
     let server = http
       .createServer(app)
       .listen({ port: serverPort, host: glowAudioIp });
-
-    //app.use(`/${SessionId}`, express.static(appResources));
-    app.use(express.static(appResources));
 
     return server;
   }
 
   function useAuthRoutes(app: Application) {
     app.post("/auth", (req, res) => {
-      console.log(req.body);
-      return res.status(200).send("OK");
+      if (!auth.enabled) {
+        return res.json({
+          ok: true,
+          access: { auxes: auxList.map((x) => x.channel) },
+        });
+      }
+
+      const { username, password } = req.body || {};
+      const user = auth.users.find(
+        (entry) =>
+          entry.username === username && entry.password === password,
+      );
+
+      if (!user) {
+        return res.status(401).json({ error: "Invalid credentials" });
+      }
+
+      return res.json({
+        ok: true,
+        username: user.username,
+        access: user.access,
+      });
     });
   }
 
@@ -414,11 +602,22 @@ export const init = async (
       server,
     });
 
-    wss.on("connection", function (socket) {
-      connections.push(socket);
+    wss.on("connection", function (socket, req) {
+      const client: ClientConnection = {
+        id: nextClientId++,
+        socket,
+        connectedAt: Date.now(),
+        lastActivity: Date.now(),
+        aux: null,
+        personId: null,
+        personName: null,
+        address: req.socket.remoteAddress ?? null,
+        log: [],
+      };
+      connections.push(client);
 
       if (DEBUG) {
-        console.debug("New Connection");
+        console.debug("New Connection", client.id);
       }
 
       //send new connection the current config
@@ -426,12 +625,24 @@ export const init = async (
         config: {
           channels: channels,
           aux: auxList,
+          rotaPeople,
         },
       });
       socket.send(info);
 
       const isAuxQuery = (msg: ClientMessage): msg is GetAuthQuery => {
         return (msg as GetAuthQuery)["aux?"] !== undefined;
+      };
+
+      const isIdentifyRequest = (msg: ClientMessage): msg is IdentifyRequest => {
+        return (msg as IdentifyRequest).identify !== undefined;
+      };
+
+      const touchClient = (aux?: number | null) => {
+        client.lastActivity = Date.now();
+        if (aux != null) {
+          client.aux = aux;
+        }
       };
 
       socket.on("message", function message(data) {
@@ -442,27 +653,117 @@ export const init = async (
           console.debug("Message from client: ", msg);
         }
 
+        if (isIdentifyRequest(msg)) {
+          const assignment = resolvePersonAssignment(msg.identify, msg.role);
+          if (!assignment) {
+            this.send(
+              JSON.stringify({
+                identified: false,
+                error: "Person not found on today's rota",
+              }),
+            );
+            return;
+          }
+
+          client.personId = assignment.member.id;
+          client.personName = assignment.member.name;
+
+          if (assignment.auxChannel == null) {
+            this.send(
+              JSON.stringify({
+                identified: false,
+                error: `No AUX configured for role "${assignment.member.role}"`,
+                person: {
+                  id: assignment.member.id,
+                  name: assignment.member.name,
+                  role: assignment.member.role,
+                },
+              }),
+            );
+            return;
+          }
+
+          if (client.aux !== assignment.auxChannel) {
+            logClientChange(client, {
+              type: "aux",
+              aux: assignment.auxChannel,
+              auxLabel: getAuxLabelByChannel(assignment.auxChannel),
+              value: assignment.auxChannel,
+            });
+          }
+          touchClient(assignment.auxChannel);
+
+          this.send(
+            JSON.stringify({
+              identified: true,
+              aux: assignment.auxChannel,
+              person: {
+                id: assignment.member.id,
+                name: assignment.member.name,
+                role: assignment.member.role,
+                img: assignment.member.img ?? null,
+              },
+              channels: getChannelValuesForAux(assignment.auxChannel),
+            }),
+          );
+          return;
+        }
+
         /*
 				Respond to connection when a request was made for the current values for a AUX.
 				*/
         if (isAuxQuery(msg)) {
-          let channelValues: Record<number, OSCValue> = {};
-          for (let value in values) {
-            for (let channel of channels) {
-              if (value == "a" + msg["aux?"] + "|c" + channel.channel) {
-                channelValues[channel.channel] = values[value];
-              }
-            }
+          const newAux = msg["aux?"];
+          if (client.aux !== newAux) {
+            logClientChange(client, {
+              type: "aux",
+              aux: newAux,
+              auxLabel: getAuxLabelByChannel(newAux),
+              value: newAux,
+            });
           }
+          touchClient(newAux);
 
           this.send(
             JSON.stringify({
               "aux?": msg["aux?"],
-              channels: channelValues,
-            })
+              channels: getChannelValuesForAux(newAux),
+            }),
           );
 
           return;
+        }
+
+        if ("aux" in msg) {
+          touchClient(msg.aux);
+
+          if (msg.level !== undefined) {
+            const existing = values["a" + msg.aux + "|c" + msg.channel];
+            logClientChange(client, {
+              type: "level",
+              aux: msg.aux,
+              auxLabel: getAuxLabelByChannel(msg.aux),
+              channel: msg.channel,
+              channelLabel: getChannelLabelByNumber(msg.channel),
+              value: msg.level,
+              previousValue: existing?.level ?? null,
+            });
+          }
+
+          if (msg.pan !== undefined) {
+            const existing = values["a" + msg.aux + "|c" + msg.channel];
+            logClientChange(client, {
+              type: "pan",
+              aux: msg.aux,
+              auxLabel: getAuxLabelByChannel(msg.aux),
+              channel: msg.channel,
+              channelLabel: getChannelLabelByNumber(msg.channel),
+              value: msg.pan,
+              previousValue: existing?.pan ?? null,
+            });
+          }
+        } else {
+          touchClient();
         }
 
         //save the update
@@ -473,6 +774,24 @@ export const init = async (
 
         //tell other connections to update
         sendToConnections(msg, this);
+      });
+
+      socket.on("close", () => {
+        const index = connections.findIndex(
+          (connection) => connection.socket === socket,
+        );
+        if (index === -1) {
+          return;
+        }
+
+        disconnectedClients.unshift(
+          serializeClient(connections[index], Date.now()),
+        );
+        if (disconnectedClients.length > 50) {
+          disconnectedClients.pop();
+        }
+
+        connections.splice(index, 1);
       });
     });
 
@@ -529,7 +848,7 @@ export const init = async (
     startWebSocketServer(server);
 
     console.log(
-      `\n\nServer Ready.\nVisit ${webappUrl} in a web browser to access OSC Web Mixer.\nPlease make sure the device you want to use is on the same network.`
+      `\n\nServer Ready.\nVisit ${webappUrl} in a web browser to access OSC Web Mixer.\nAdmin dashboard: ${webappUrl}admin.html\nPlease make sure the device you want to use is on the same network.`,
     );
 
     QRCodeTerminal.generate(webappUrl, { small: true });
@@ -542,20 +861,12 @@ export const init = async (
    * @param socket ignore - A socket connection to not send the message to.
    */
   function sendToConnections(msg: any, ignore: null | WebSocket = null) {
-    const validConnections: WebSocket[] = [];
+    connections = getActiveConnections();
     connections.forEach(function (connection) {
-      /**
-       * CONNECTING = 0
-       * OPEN = 1
-       */
-      if (connection.readyState <= 1) {
-        validConnections.push(connection);
-        if (connection != ignore) {
-          connection.send(JSON.stringify(msg));
-        }
+      if (connection.socket != ignore) {
+        connection.socket.send(JSON.stringify(msg));
       }
     });
-    connections = validConnections;
   }
 
   type SaveConfigRequest =

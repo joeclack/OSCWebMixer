@@ -466,3 +466,81 @@ label.pan {
 #auxiliaries button:last-child {
   margin-bottom: auto;
 }
+
+.identity-picker {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: max(calc(20px + env(safe-area-inset-top)), 40px) 24px 24px;
+}
+
+.identity-picker[hidden] {
+  display: none !important;
+}
+
+.identity-picker-inner {
+  width: 100%;
+  max-width: 420px;
+}
+
+.identity-picker-inner h2 {
+  margin-bottom: 8px;
+  text-align: center;
+}
+
+.identity-picker-hint {
+  text-align: center;
+  opacity: 0.75;
+  margin-bottom: 20px;
+}
+
+#identityList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.identity-option {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+  cursor: pointer;
+  padding: 16px 20px;
+  border-radius: 4px;
+  border: 0;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.12);
+  text-align: left;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.35);
+}
+
+.identity-option img {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  object-fit: cover;
+  box-shadow: 0 0 7px rgba(0, 0, 0, 0.6);
+}
+
+.identity-option-name {
+  font-weight: bold;
+}
+
+.identity-option-role {
+  opacity: 0.8;
+  font-size: 0.9rem;
+}
+
+.identity-error {
+  color: #fca5a5;
+  text-align: center;
+  margin-top: 12px;
+}
+
+.identity-role-picker {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}

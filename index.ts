@@ -2,11 +2,8 @@
 import config from "config";
 import { init } from "./api/webmixer";
 import Mapper from "./mapping/SD-mapping";
-import { Fetcher } from "./api/planningCenter";
+import { createUserProvider, UserProviderType } from "./api/userProvider";
 import secret from "./config/secrets.json";
-
-// const config = require("config"),
-//   webmixer = require("./api/webmixer");
 
 if (config.has("ignore_channels")) {
   console.log(
@@ -39,23 +36,49 @@ if (config.has("desk.type")) {
 }
 
 console.log("Loading DiGiCo " + type + " configuration");
-const planningCenterConfig = {
-  ...(config.get("planningCenter") as {
-    baseUrl: string;
-    worshipTeamId: string;
-  }),
-  ...secret.planningCenter,
-};
-const planningCenter = new Fetcher(planningCenterConfig);
+
+const SKIP = process.argv.indexOf("skip") !== -1;
+
+const userProviderType: UserProviderType = SKIP
+  ? "offline"
+  : config.has("userProvider.type")
+    ? config.get("userProvider.type")
+    : config.has("planningCenter")
+      ? "planningCenter"
+      : "offline";
+
+const userProvider = createUserProvider({
+  type: userProviderType,
+  churchsuite: config.has("churchsuite")
+    ? config.get("churchsuite")
+    : undefined,
+  planningCenter:
+    userProviderType === "planningCenter" && config.has("planningCenter")
+      ? {
+          ...(config.get("planningCenter") as {
+            baseUrl: string;
+            worshipTeamId: string;
+          }),
+          appId: (secret as { planningCenter: { appId: string; secret: string } })
+            .planningCenter.appId,
+          secret: (secret as { planningCenter: { appId: string; secret: string } })
+            .planningCenter.secret,
+        }
+      : undefined,
+  secrets: secret as {
+    churchsuite?: { username: string; password: string };
+    planningCenter?: { appId: string; secret: string };
+  },
+});
 
 init(
   config.get("desk.send_port"),
   config.get("desk.receive_port"),
-  config.get("desk.ip"), //remoteAddress
-  config.get("aux"), //The AUX channels for the session file you will be connecting to
-  config.get("channels"), // A list of channels that are available to mix with.
-  config.get("server.port"), // The port for the web server
+  config.get("desk.ip"),
+  config.get("aux"),
+  config.get("channels"),
+  config.get("server.port"),
   new Mapper(config),
   config.get("auth"),
-  planningCenter
+  userProvider,
 );

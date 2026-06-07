@@ -1,4 +1,16 @@
 {
+  "userProvider": {
+    "type": "churchsuite"
+  },
+  "churchsuite": {
+    "accountId": "glowchurchuk",
+    "siteId": 1,
+    "domain": "churchsuite.com",
+    "rotaNames": [
+      "Worship Team"
+    ],
+    "clientMode": "session"
+  },
   "planningCenter": {
     "baseUrl": "https://api.planningcenteronline.com/services/v2",
     "worshipTeamId": "5715257"
@@ -77,7 +89,7 @@
     },
     {
       "label": "EG 2",
-      "extraPlanningCenterNames": [
+      "extraRoleNames": [
         "AG 1"
       ],
       "channel": 5,

@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <title>OSC Web Mixer Admin</title>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="stylesheet" href="admin.css" />
+    <link rel="shortcut icon" href="/images/favicon.ico" type="image/x-icon" />
+  </head>
+  <body>
+    <div class="admin-shell">
+      <aside class="sidebar">
+        <div class="sidebar-brand">
+          <span>OSC Web Mixer</span>
+          <small>Admin</small>
+        </div>
+
+        <nav class="sidebar-nav" id="sidebarNav">
+          <button type="button" class="nav-item active" data-page="overview">
+            Overview
+          </button>
+          <button type="button" class="nav-item" data-page="live-mix">
+            Live mix
+          </button>
+          <button type="button" class="nav-item" data-page="clients">
+            Clients
+          </button>
+          <button type="button" class="nav-item" data-page="config">
+            Config
+          </button>
+        </nav>
+
+        <a class="sidebar-footer" href="/">Back to mixer</a>
+      </aside>
+
+      <div class="admin-main">
+        <header class="page-header">
+          <button
+            type="button"
+            class="sidebar-toggle"
+            id="sidebarToggle"
+            aria-label="Toggle navigation"
+          >
+            Menu
+          </button>
+          <h1 id="pageTitle">Overview</h1>
+        </header>
+
+        <main class="page-content">
+          <section class="card" id="loading">
+            <p>Connecting to server…</p>
+          </section>
+
+          <div id="content" hidden>
+            <section class="page active" data-page="overview">
+              <div class="card stats">
+                <div class="stat">
+                  <span class="stat-label">Connected clients</span>
+                  <span class="stat-value" id="connections">—</span>
+                </div>
+                <div class="stat">
+                  <span class="stat-label">Auth</span>
+                  <span class="stat-value" id="authStatus">—</span>
+                </div>
+                <div class="stat">
+                  <span class="stat-label">AUX sends</span>
+                  <span class="stat-value" id="auxCount">—</span>
+                </div>
+                <div class="stat">
+                  <span class="stat-label">Channels</span>
+                  <span class="stat-value" id="channelCount">—</span>
+                </div>
+              </div>
+
+              <section class="card">
+                <h2>Mixer URL</h2>
+                <div class="url-row">
+                  <a id="mixerUrl" href="/" target="_blank" rel="noopener"></a>
+                  <button type="button" id="copyUrl">Copy</button>
+                </div>
+                <div class="qr-wrap">
+                  <img id="qrCode" alt="QR code for mixer URL" />
+                </div>
+              </section>
+            </section>
+
+            <section class="page" data-page="live-mix">
+              <section class="card live-mix-section">
+                <p id="liveMixHint" class="muted">
+                  Select an AUX to view live sends.
+                </p>
+                <div id="auxMenu" class="aux-menu"></div>
+                <details class="foldable" id="liveMixFold">
+                  <summary id="liveMixSummary">Live sends</summary>
+                  <div id="liveMixPanel" class="foldable-body">
+                    <div class="live-mix-header">
+                      <h2 id="liveMixTitle"></h2>
+                      <label class="pan-toggle" id="panToggleLabel" hidden>
+                        <input id="panToggle" type="checkbox" />
+                        <span>PAN</span>
+                      </label>
+                    </div>
+                    <div id="liveMixChannels" class="live-mix-channels"></div>
+                  </div>
+                </details>
+              </section>
+            </section>
+
+            <section class="page" data-page="clients">
+              <section class="card">
+                <h2>Connected clients</h2>
+                <p id="noClients" class="muted" hidden>No clients connected.</p>
+                <div id="clientsList"></div>
+              </section>
+
+              <section class="card" id="disconnectedSection" hidden>
+                <h2>Disconnected clients</h2>
+                <div id="disconnectedClientsList"></div>
+              </section>
+            </section>
+
+            <section class="page" data-page="config">
+              <section class="card">
+                <h2>AUX sends</h2>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Channel</th>
+                      <th>Label</th>
+                      <th>Stereo</th>
+                    </tr>
+                  </thead>
+                  <tbody id="auxTable"></tbody>
+                </table>
+              </section>
+
+              <section class="card">
+                <h2>Input channels</h2>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Channel</th>
+                      <th>Label</th>
+                    </tr>
+                  </thead>
+                  <tbody id="channelTable"></tbody>
+                </table>
+              </section>
+            </section>
+          </div>
+
+          <section class="card error" id="error" hidden>
+            <p>Could not load server status.</p>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <script src="admin.js"></script>
+  </body>
+</html>
