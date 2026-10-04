@@ -85,6 +85,8 @@ export const init = async (
   const SKIP = process.argv.indexOf("skip") !== -1;
   const DEBUG = process.argv.indexOf("debug") !== -1;
 
+  console.log("Skip: ", SKIP, "Debug: ", DEBUG);
+
   let offlineMode = SKIP;
   let rotaMembers: RotaMember[] = [];
   let chosenService: ServiceRef | null = null;
@@ -249,7 +251,7 @@ export const init = async (
 
   let ipAddresses = getIPAddresses();
   let glowAudioIp = ipAddresses.find((x) => x.startsWith("192.168.6"));
-  if (SKIP) glowAudioIp = ipAddresses[0];
+  // if (SKIP) glowAudioIp = ipAddresses[0];
 
   //if (!glowAudioIp) throw new Error("NO IP FOUND FOR GLOW AUDIO");
   // if (!glowAudioIp.endsWith("7"))
@@ -257,16 +259,14 @@ export const init = async (
   //    "GLOW AUDIO IP DOES NOT END WITH 7 - DOES IT MATCH THE CONSOLE"
   //  );
 
-  if (
-    !offlineMode &&
-    chosenService &&
-    isPlanningCenterProvider(userProvider)
-  ) {
-    await userProvider.getFetcher().setPlanNote(
-      `EARS MIXER URL: \n\n ${getWebAppUrl()}`,
-      String(chosenService.meta?.plan ?? chosenService.id),
-      String(chosenService.meta?.serviceType ?? ""),
-    );
+  if (!offlineMode && chosenService && isPlanningCenterProvider(userProvider)) {
+    await userProvider
+      .getFetcher()
+      .setPlanNote(
+        `EARS MIXER URL: \n\n ${getWebAppUrl()}`,
+        String(chosenService.meta?.plan ?? chosenService.id),
+        String(chosenService.meta?.serviceType ?? ""),
+      );
   }
 
   /*
@@ -299,16 +299,16 @@ export const init = async (
 
     loadingProgress.start(totalParamsToLoad, 0);
 
-    if (SKIP) {
-      loadingProgress.update(totalParamsToLoad);
-      loadingProgress.stop();
+    // if (SKIP) {
+    //   loadingProgress.update(totalParamsToLoad);
+    //   loadingProgress.stop();
 
-      udpPort.off("message", loadingMessages);
-      udpPort.on("message", loadedMessages);
+    //   udpPort.off("message", loadingMessages);
+    //   udpPort.on("message", loadedMessages);
 
-      startServer();
-      return;
-    }
+    //   startServer();
+    //   return;
+    // }
 
     /*
 		Start loading values from the desk
@@ -475,8 +475,7 @@ export const init = async (
       auxLabel: aux?.label ?? null,
       auxColour: aux?.colour ?? null,
       personName: connection.personName,
-      levels:
-        connection.aux != null ? getClientLevels(connection.aux) : null,
+      levels: connection.aux != null ? getClientLevels(connection.aux) : null,
       log: connection.log,
     };
   }
@@ -581,8 +580,7 @@ export const init = async (
 
       const { username, password } = req.body || {};
       const user = auth.users.find(
-        (entry) =>
-          entry.username === username && entry.password === password,
+        (entry) => entry.username === username && entry.password === password,
       );
 
       if (!user) {
@@ -634,7 +632,9 @@ export const init = async (
         return (msg as GetAuthQuery)["aux?"] !== undefined;
       };
 
-      const isIdentifyRequest = (msg: ClientMessage): msg is IdentifyRequest => {
+      const isIdentifyRequest = (
+        msg: ClientMessage,
+      ): msg is IdentifyRequest => {
         return (msg as IdentifyRequest).identify !== undefined;
       };
 
